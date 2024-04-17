@@ -16,5 +16,4 @@ def get_tun(name: str, is_create: bool) -> int:
     return tun
 
 if __name__ == "__main__":
-    tun_fd = get_tun(b"playtun", True)
-    print(f"Tun device playtun has fd of {tun_fd}")
+    _ = get_tun(b"playtun", True)
