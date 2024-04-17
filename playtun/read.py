@@ -1,6 +1,9 @@
 from get import get_tun
 
 def read_tun(name: str):
+    """
+    Continuously read data from a tun device in a loop.
+    """
     tun = get_tun(name, False)
     while True:
         data = tun.read(1024)
