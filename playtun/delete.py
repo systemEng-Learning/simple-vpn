@@ -4,7 +4,7 @@ from fcntl import ioctl
 
 def delete_tun(name: str):
     """
-    This function deletes a tun device. We can use the function to delete 
+    This function deletes a tun device. We can use the function to delete
     an already existing tun device with name. If the tun device exists, its
     persistent attribute is unset. If the tun device does not exist,
     a tun device is created, butit's quickly removed automatically by the kernel
@@ -19,6 +19,7 @@ def delete_tun(name: str):
     ioctl(tun, LINUX_TUNSETIFF, ifs)
     LINUX_TUNSETPERSIST = 0x400454CB
     ioctl(tun, LINUX_TUNSETPERSIST, 0)
+
 
 if __name__ == "__main__":
     tun_fd = delete_tun("playtun")
