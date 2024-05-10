@@ -6,10 +6,10 @@ import struct
 from get import get_tun
 
 
-def dump(name: str):
+def dump_tun(name: str):
     tun = get_tun(name, False)
     while True:
-        data = tun.read()
+        data = tun.read(1024)
         if len(data) > 0:
             dump_packet(data)
 
@@ -34,8 +34,8 @@ def dump_ipv4_packet(packet):
     protocol_name = "?" if protocol_name == "" else protocol_name
 
     ttl = packet[8]
-    args = tuple(p for p in packet[12:20]) + (protocol, protocol_name, ttl)
-    print("IPv4: src=%d.%d.%d.%d dst=%d.%d.%d.%d proto=%d(%s) ttl=%d" % args)
+    args = tuple(p for p in packet[12:20]) + (protocol, protocol_name, ttl, len(packet))
+    print("IPv4: src=%d.%d.%d.%d dst=%d.%d.%d.%d proto=%d(%s) ttl=%d len=%d" % args)
     dump_ports(protocol, packet[20:])
     print(f" HEX: {packet.hex()}")
 
@@ -54,7 +54,7 @@ def dump_ipv6_packet(packet):
     source_address = packet[8:24].hex()
     dest_address = packet[24:40].hex()
     print(
-        f"IPv6 src={source_address} dst={dest_address} proto={protocol}({protocol_name}) hop_limit={hop_limit}"
+        f"IPv6 src={source_address} dst={dest_address} proto={protocol}({protocol_name}) hop_limit={hop_limit} len={len(packet)}"
     )
     dump_ports(protocol, packet[40:])
     print(f" HEX: {packet.hex()}")
@@ -98,4 +98,4 @@ def getprotobynumber(protocol: int) -> str:
 
 
 if __name__ == "__main__":
-    dump("playtun")
+    dump_tun("playtun")
