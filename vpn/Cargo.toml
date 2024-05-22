@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 etherparse = "0.13"
 libc = "0.2"
-socket2 = { version = "0.5.7", features = ["all"], optional = true }
+socket2 = "0.5.7"
 thiserror = "1.0.60"
