@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::fmt::Error;
 use std::mem::MaybeUninit;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::{
@@ -9,6 +8,8 @@ use std::{
 
 use etherparse::Ipv4HeaderSlice;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+
+use crate::tunerror;
 
 pub struct Net {
     fd: RawFd,
@@ -53,8 +54,12 @@ impl Net {
         if self.ip_map.is_none() {
             let _ = self.socket.send(buf).unwrap();
         } else {
-            let slice = Ipv4HeaderSlice::from_slice(&buf).unwrap();
-            let destination_ip = slice.destination_addr();
+            let slice = Ipv4HeaderSlice::from_slice(&buf);
+            if slice.is_err() {
+                println!("{:?}", slice.err().unwrap());
+                return;
+            }
+            let destination_ip = slice.unwrap().destination_addr();
             let client_ip = self.ip_map.as_ref().unwrap().get(&destination_ip);
             if client_ip.is_some() {
                 let _ = self.socket.send_to(buf, client_ip.unwrap()).unwrap();
@@ -62,14 +67,22 @@ impl Net {
         }
     }
 
-    pub fn recv(&mut self) -> Result<Vec<u8>, Error> {
+    pub fn recv(&mut self) -> Result<Vec<u8>, tunerror::Error> {
         let mut buf = [0; 4096];
         let recv_buf = unsafe { &mut *(&mut buf[..] as *mut [u8] as *mut [MaybeUninit<u8>]) };
         let (amount, remote_sock) = self.socket.recv_from(recv_buf).unwrap();
         if self.ip_map.is_some() {
-            let slice = Ipv4HeaderSlice::from_slice(&buf[..amount]).unwrap();
-            let source_ip = slice.source_addr();
-            self.ip_map.as_mut().unwrap().insert(source_ip, remote_sock);
+            let slice = Ipv4HeaderSlice::from_slice(&buf[..amount]);
+            match slice {
+                Ok(header) => {
+                    let source_ip = header.source_addr();
+                    self.ip_map.as_mut().unwrap().insert(source_ip, remote_sock);
+                },
+                Err(e) => { 
+                    println!("{:?}", e); 
+                    return Err(tunerror::Error::Message("Invalid packet".to_owned()))
+                },
+            }
         }
         let buf_vec = buf[..amount].to_vec();
         Ok(buf_vec)

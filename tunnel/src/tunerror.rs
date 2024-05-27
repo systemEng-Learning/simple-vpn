@@ -34,4 +34,6 @@ pub enum Error {
     DropPrivileges(String),
     #[error("API socket error: {0}")]
     ApiSocket(io::Error),
+    #[error("{0}")]
+    Message(String),
 }
