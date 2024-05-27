@@ -1,3 +1,4 @@
+use std::env;
 use std::os::unix::io::AsRawFd;
 
 use tunnel::net::Net;
@@ -5,9 +6,52 @@ use tunnel::select::{select, FdSet};
 use tunnel::tun::TunSocket;
 
 pub fn main() {
-    println!("Hello, world!");
-    let mut net = Net::new("", 2000, false).unwrap();
-    let tunnel = TunSocket::new("playtun").unwrap();
+    let args: Vec<String> = env::args().collect();
+    if args.len() < 2 {
+        panic!("You didn't supply enough arguments");
+    }
+    let (name, remote_addr, is_client, port) = parse_args(args);
+    if is_client && remote_addr == "" {
+        panic!("You must supply a server ip and port number for a client");
+    }
+
+    let net = Net::new(&remote_addr, port, is_client).unwrap();
+    let tunnel = TunSocket::new(&name).unwrap();
+    run(net, tunnel);
+}
+
+fn parse_args(args: Vec<String>) -> (String, String, bool, u16) {
+    let mut name = String::from("playtun");
+    let mut remote_addr = String::from("");
+    let mut is_client = false;
+    let mut port = 2000;
+    let mut i = 1;
+    while i < args.len() {
+        if args[i] == "--client" || args[i] == "--c" {
+            is_client = true;
+            i += 1;
+            continue;
+        }
+
+        if (args[i] == "--name" || args[i] == "-n") && i+1 < args.len() {
+            name = args[i+1].clone();
+        }
+
+        
+
+        if (args[i] == "--address" || args[i] == "-a") && i+1 < args.len() {
+            remote_addr = args[i+1].clone();
+        }
+
+        if (args[i] == "--port" || args[i] == "-p") && i+1 < args.len() {
+            port = args[i+1].parse().unwrap();
+        }
+        i += 2;
+    }
+    return (name, remote_addr, is_client, port)
+}
+
+fn run(mut net: Net, tunnel: TunSocket) {
     let mut tun2net = 0;
     let mut net2tun = 0;
     loop {
