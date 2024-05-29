@@ -77,20 +77,15 @@ impl Net {
     }
 
     fn encrypt(buf: &mut [u8], size: usize) -> usize {
-        println!("Before: {:?}", &mut buf[..IPV4_HEADER_LEN]);
         let mut length = u16::from_be_bytes([buf[2], buf[3]]);
-        println!("Original size: {size}, Stated size: {length}");
         buf[size] = 5;
         length += 1;
         let bytes = length.to_be_bytes();
         buf[2] = bytes[0];
         buf[3] = bytes[1];
-        println!("Decoded size: {}", u16::from_be_bytes(bytes));
         let mut header_length = (buf[0] & 15) as usize;
         header_length *= 4;
-        println!("Header Length {header_length}");
         Self::set_header_checksum(&mut buf[..header_length]);
-        println!("After: {:?}", &mut buf[..header_length]);
         size + 1
     }
 
@@ -140,7 +135,6 @@ impl Net {
         csum = csum.add_4bytes([buf[12], buf[13], buf[14], buf[15]]);
         csum = csum.add_4bytes([buf[16], buf[17], buf[18], buf[19]]);
         if buf.len() > IPV4_HEADER_LEN {
-            println!("here");
             csum = csum.add_slice(&buf[IPV4_HEADER_LEN..]);
         }
         let sum = csum.ones_complement().to_be().to_be_bytes();

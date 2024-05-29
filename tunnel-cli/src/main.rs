@@ -7,9 +7,6 @@ use tunnel::tun::TunSocket;
 
 pub fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        panic!("You didn't supply enough arguments");
-    }
     let (name, remote_addr, is_client, port) = parse_args(args);
     if is_client && remote_addr == "" {
         panic!("You must supply a server ip and port number for a client");
