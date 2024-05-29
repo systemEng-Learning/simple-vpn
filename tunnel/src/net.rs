@@ -78,13 +78,16 @@ impl Net {
 
     fn encrypt(buf: &mut [u8], size: usize) -> usize {
         let mut length = u16::from_be_bytes([buf[2], buf[3]]);
+        println!("Original size: {size}, Stated size: {length}");
         buf[size] = 5;
         length += 1;
         let bytes = length.to_be_bytes();
         buf[2] = bytes[0];
         buf[3] = bytes[1];
+        println!("Decoded size: {}", u16::from_be_bytes(bytes));
         let mut header_length = (buf[0] & 15) as usize;
         header_length *= 4;
+        println!("Header Length {header_length}");
         Self::set_header_checksum(&mut buf[..header_length]);
         size + 1
     }
