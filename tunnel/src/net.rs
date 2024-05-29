@@ -77,6 +77,7 @@ impl Net {
     }
 
     fn encrypt(buf: &mut [u8], size: usize) -> usize {
+        println!("Before: {:?}", &mut buf[..IPV4_HEADER_LEN]);
         let mut length = u16::from_be_bytes([buf[2], buf[3]]);
         println!("Original size: {size}, Stated size: {length}");
         buf[size] = 5;
@@ -89,7 +90,7 @@ impl Net {
         header_length *= 4;
         println!("Header Length {header_length}");
         Self::set_header_checksum(&mut buf[..header_length]);
-        println!("{:?}", &mut buf[..header_length]);
+        println!("After: {:?}", &mut buf[..header_length]);
         size + 1
     }
 
