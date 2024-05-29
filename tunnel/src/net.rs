@@ -6,7 +6,7 @@ use std::{
     os::fd::{AsRawFd, RawFd},
 };
 
-use etherparse::{Ipv4HeaderSlice, checksum::u64_16bit_word};
+use etherparse::{Ipv4HeaderSlice, checksum};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 use crate::tunerror;
@@ -76,16 +76,12 @@ impl Net {
         let mut length = u16::from_be_bytes([buf[2], buf[3]]);
         buf[size] = 5;
         length += 1;
-        let bytes = u16::to_be_bytes(length);
+        let bytes = length.to_be_bytes();
         buf[2] = bytes[0];
         buf[3] = bytes[1];
-        buf[10] = 0;
-        buf[11] = 0;
-        let sum = u64_16bit_word::add_slice(0, &buf[..IPV4_HEADER_LEN]);
-        let sum = u64_16bit_word::ones_complement(sum);
-        let bytes = u16::to_be_bytes(sum);
-        buf[10] = bytes[0];
-        buf[11] = bytes[1];
+        let mut header_length = (buf[0] & 15) as usize;
+        header_length *= 4;
+        Self::set_header_checksum(&mut buf[..header_length]);
         size + 1
     }
 
@@ -114,16 +110,27 @@ impl Net {
     fn decrypt(buf: &mut [u8], size: usize) -> usize {
         let mut length = u16::from_be_bytes([buf[2], buf[3]]);
         length -= 1;
-        let bytes = u16::to_be_bytes(length);
+        let bytes = length.to_be_bytes();
         buf[2] = bytes[0];
         buf[3] = bytes[1];
-        buf[10] = 0;
-        buf[11] = 0;
-        let sum = u64_16bit_word::add_slice(0, &buf[..IPV4_HEADER_LEN]);
-        let sum = u64_16bit_word::ones_complement(sum);
-        let bytes = u16::to_be_bytes(sum);
-        buf[10] = bytes[0];
-        buf[11] = bytes[1];
+        let mut header_length = (buf[0] & 15) as usize;
+        header_length *= 4;
+        Self::set_header_checksum(&mut buf[..header_length]);
         size - 1
+    }
+
+    fn set_header_checksum(buf: &mut [u8]) {
+        let mut csum = checksum::Sum16BitWords::new();
+        for x in (0..10).step_by(2) {
+            csum = csum.add_2bytes([buf[x], buf[x+1]]);
+        }
+        csum = csum.add_4bytes([buf[12], buf[13], buf[14], buf[15]]);
+        csum = csum.add_4bytes([buf[16], buf[17], buf[18], buf[19]]);
+        if buf.len() > IPV4_HEADER_LEN {
+            csum = csum.add_slice(&buf[IPV4_HEADER_LEN..]);
+        }
+        let sum = csum.ones_complement().to_be_bytes();
+        buf[10] = sum[0];
+        buf[11] = sum[1];
     }
 }
