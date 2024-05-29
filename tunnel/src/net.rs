@@ -53,6 +53,10 @@ impl Net {
     }
 
     pub fn send(&self, buf: &mut [u8], size: usize) -> usize {
+        let version = buf[0] >> 4;
+        if version != 4 {
+            return 0;
+        }
         let new_size = Self::encrypt(buf, size);
         let buf = &buf[..new_size];
         if self.ip_map.is_none() {
@@ -89,6 +93,10 @@ impl Net {
         let mut buf = [0; 4096];
         let recv_buf = unsafe { &mut *(&mut buf[..] as *mut [u8] as *mut [MaybeUninit<u8>]) };
         let (amount, remote_sock) = self.socket.recv_from(recv_buf).unwrap();
+        let version = buf[0] >> 4;
+        if version != 4 {
+            return Err(tunerror::Error::Message("Invalid packet".to_owned()));
+        }
         let new_size = Self::decrypt(&mut buf, amount);
         if self.ip_map.is_some() {
             let slice = Ipv4HeaderSlice::from_slice(&buf[..new_size]);
