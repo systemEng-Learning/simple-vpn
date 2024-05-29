@@ -89,6 +89,7 @@ impl Net {
         header_length *= 4;
         println!("Header Length {header_length}");
         Self::set_header_checksum(&mut buf[..header_length]);
+        println!("{:?}", &mut buf[..header_length]);
         size + 1
     }
 
