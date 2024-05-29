@@ -143,7 +143,7 @@ impl Net {
             println!("here");
             csum = csum.add_slice(&buf[IPV4_HEADER_LEN..]);
         }
-        let sum = csum.ones_complement().to_be_bytes();
+        let sum = csum.ones_complement().to_be().to_be_bytes();
         buf[10] = sum[0];
         buf[11] = sum[1];
     }
