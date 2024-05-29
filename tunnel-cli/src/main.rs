@@ -67,8 +67,8 @@ fn run(mut net: Net, tunnel: TunSocket) {
                 println!("select result: {res}");
                 if fdset.is_set(net_fd) {
                     net2tun += 1;
-                    let buf = net.recv().unwrap();
-                    println!("NET2TUN {net2tun}: Read {} from network", buf.len());
+                    let (buf, amt) = net.recv().unwrap();
+                    println!("NET2TUN {net2tun}: Read {amt} from network");
                     let amt = tunnel.write(buf.as_slice());
                     println!("NET2TUN {net2tun}: Written {amt} to tunnel");
                 }
@@ -77,7 +77,7 @@ fn run(mut net: Net, tunnel: TunSocket) {
                     tun2net += 1;
                     let amt = tunnel.read(&mut dst).unwrap();
                     println!("TUN2NET {tun2net}: Read {amt} from tunnel");
-                    net.send(&dst[..amt]);
+                    let amt = net.send(&mut dst, amt);
                     println!("TUN2NET {tun2net}: Written {amt} to network");
                 }
             }

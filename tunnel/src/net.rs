@@ -6,10 +6,12 @@ use std::{
     os::fd::{AsRawFd, RawFd},
 };
 
-use etherparse::Ipv4HeaderSlice;
+use etherparse::{Ipv4HeaderSlice, checksum::u64_16bit_word};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 use crate::tunerror;
+
+const IPV4_HEADER_LEN: usize = 20;
 
 pub struct Net {
     fd: RawFd,
@@ -50,14 +52,16 @@ impl Net {
         Ok(net)
     }
 
-    pub fn send(&self, buf: &[u8]) {
+    pub fn send(&self, buf: &mut [u8], size: usize) -> usize {
+        let new_size = Self::encrypt(buf, size);
+        let buf = &buf[..new_size];
         if self.ip_map.is_none() {
             let _ = self.socket.send(buf).unwrap();
         } else {
             let slice = Ipv4HeaderSlice::from_slice(&buf);
             if slice.is_err() {
                 println!("{:?}", slice.err().unwrap());
-                return;
+                return 0;
             }
             let destination_ip = slice.unwrap().destination_addr();
             let client_ip = self.ip_map.as_ref().unwrap().get(&destination_ip);
@@ -65,14 +69,33 @@ impl Net {
                 let _ = self.socket.send_to(buf, client_ip.unwrap()).unwrap();
             }
         }
+        new_size
     }
 
-    pub fn recv(&mut self) -> Result<Vec<u8>, tunerror::Error> {
+    fn encrypt(buf: &mut [u8], size: usize) -> usize {
+        let mut length = u16::from_be_bytes([buf[2], buf[3]]);
+        buf[size] = 5;
+        length += 1;
+        let bytes = u16::to_be_bytes(length);
+        buf[2] = bytes[0];
+        buf[3] = bytes[1];
+        buf[10] = 0;
+        buf[11] = 0;
+        let sum = u64_16bit_word::add_slice(0, &buf[..IPV4_HEADER_LEN]);
+        let sum = u64_16bit_word::ones_complement(sum);
+        let bytes = u16::to_be_bytes(sum);
+        buf[10] = bytes[0];
+        buf[11] = bytes[1];
+        size + 1
+    }
+
+    pub fn recv(&mut self) -> Result<(Vec<u8>, usize), tunerror::Error> {
         let mut buf = [0; 4096];
         let recv_buf = unsafe { &mut *(&mut buf[..] as *mut [u8] as *mut [MaybeUninit<u8>]) };
         let (amount, remote_sock) = self.socket.recv_from(recv_buf).unwrap();
+        let new_size = Self::decrypt(&mut buf, amount);
         if self.ip_map.is_some() {
-            let slice = Ipv4HeaderSlice::from_slice(&buf[..amount]);
+            let slice = Ipv4HeaderSlice::from_slice(&buf[..new_size]);
             match slice {
                 Ok(header) => {
                     let source_ip = header.source_addr();
@@ -84,7 +107,23 @@ impl Net {
                 },
             }
         }
-        let buf_vec = buf[..amount].to_vec();
-        Ok(buf_vec)
+        let buf_vec = buf[..new_size].to_vec();
+        Ok((buf_vec, amount))
+    }
+
+    fn decrypt(buf: &mut [u8], size: usize) -> usize {
+        let mut length = u16::from_be_bytes([buf[2], buf[3]]);
+        length -= 1;
+        let bytes = u16::to_be_bytes(length);
+        buf[2] = bytes[0];
+        buf[3] = bytes[1];
+        buf[10] = 0;
+        buf[11] = 0;
+        let sum = u64_16bit_word::add_slice(0, &buf[..IPV4_HEADER_LEN]);
+        let sum = u64_16bit_word::ones_complement(sum);
+        let bytes = u16::to_be_bytes(sum);
+        buf[10] = bytes[0];
+        buf[11] = bytes[1];
+        size - 1
     }
 }
