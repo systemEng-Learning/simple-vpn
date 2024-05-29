@@ -138,6 +138,7 @@ impl Net {
         csum = csum.add_4bytes([buf[12], buf[13], buf[14], buf[15]]);
         csum = csum.add_4bytes([buf[16], buf[17], buf[18], buf[19]]);
         if buf.len() > IPV4_HEADER_LEN {
+            println!("here");
             csum = csum.add_slice(&buf[IPV4_HEADER_LEN..]);
         }
         let sum = csum.ones_complement().to_be_bytes();
