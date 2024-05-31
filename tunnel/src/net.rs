@@ -94,6 +94,7 @@ impl Net {
         Ok(net)
     }
 
+    /// Sends an IP packet to a UDP endpoint.
     pub fn send(&self, buf: &mut [u8], size: usize) -> usize {
         let version = buf[0] >> 4;
         if version != 4 {
@@ -123,15 +124,9 @@ impl Net {
         new_size
     }
 
+    /// Encrypts a packet to be sent over the network
     fn encrypt(&self, buf: &mut [u8], size: usize) -> Result<usize, Unspecified> {
-        let mut length = u16::from_be_bytes([buf[2], buf[3]]);
-        length += AES_256_GCM.tag_len() as u16;
-        let bytes = length.to_be_bytes();
-        buf[2] = bytes[0];
-        buf[3] = bytes[1];
-        let mut header_length = (buf[0] & 15) as usize;
-        header_length *= 4;
-        self.set_header_checksum(&mut buf[..header_length]);
+        let header_length = self.configure_header(buf, true);
         let unbound_key = UnboundKey::new(&AES_256_GCM, &self.key)?;
         let nonce_sequence = CounterNonceSequence(1);
         let mut sealing_key = SealingKey::new(unbound_key, nonce_sequence);
@@ -139,12 +134,16 @@ impl Net {
 
         let tag = sealing_key
             .seal_in_place_separate_tag(associated_data, &mut buf[header_length..size])?;
+
+        // Add the tag data to the buffer
         for i in 0..AES_256_GCM.tag_len() {
             buf[size + i] = tag.as_ref()[i];
         }
         Ok(size + AES_256_GCM.tag_len())
     }
 
+    /// Receives a packet from the other peer and decrypts it. Only IPv4 packets can be processed
+    /// TODO: IPv6
     pub fn recv(&mut self) -> Result<(Vec<u8>, usize), tunerror::Error> {
         let mut buf = [0; 4096];
         let recv_buf = unsafe { &mut *(&mut buf[..] as *mut [u8] as *mut [MaybeUninit<u8>]) };
@@ -176,15 +175,9 @@ impl Net {
         Ok((buf_vec, amount))
     }
 
+    /// Decrypts a packet from the network using AES
     fn decrypt(&self, buf: &mut [u8], size: usize) -> Result<usize, Unspecified> {
-        let mut length = u16::from_be_bytes([buf[2], buf[3]]);
-        length -= AES_256_GCM.tag_len() as u16;
-        let bytes = length.to_be_bytes();
-        buf[2] = bytes[0];
-        buf[3] = bytes[1];
-        let mut header_length = (buf[0] & 15) as usize;
-        header_length *= 4;
-        self.set_header_checksum(&mut buf[..header_length]);
+        let header_length = self.configure_header(buf, false);
         let unbound_key = UnboundKey::new(&AES_256_GCM, &self.key)?;
         let nonce_sequence = CounterNonceSequence(1);
         let mut opening_key = OpeningKey::new(unbound_key, nonce_sequence);
@@ -193,6 +186,28 @@ impl Net {
         Ok(size - AES_256_GCM.tag_len())
     }
 
+    /// Sets a new length; the length increases if it's an encryption process, else it decreases.
+    /// The IPv4 header format https://en.wikipedia.org/wiki/IPv4#Header helps us know where
+    /// the needed data is stored. Returns the header length
+    fn configure_header(&self, buf: &mut [u8], is_encrypt: bool) -> usize {
+        let mut length = u16::from_be_bytes([buf[2], buf[3]]);
+        if is_encrypt {
+            length += AES_256_GCM.tag_len() as u16;
+        } else {
+            length -= AES_256_GCM.tag_len() as u16;
+        }
+        let bytes = length.to_be_bytes();
+        buf[2] = bytes[0];
+        buf[3] = bytes[1];
+        let mut header_length = (buf[0] & 15) as usize;
+        header_length *= 4;
+        self.set_header_checksum(&mut buf[..header_length]);
+        header_length
+    }
+
+    /// Due to the length change done by the encryption/decryption process, a new header checksum has
+    /// to be calculated. This prevents the kernel from dropping our encrypted/decrypted packets.
+    /// This also sets the checksum in the packet bytes indexes.
     fn set_header_checksum(&self, buf: &mut [u8]) {
         let mut csum = checksum::Sum16BitWords::new();
         for x in (0..10).step_by(2) {
