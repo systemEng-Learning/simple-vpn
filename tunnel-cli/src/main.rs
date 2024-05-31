@@ -7,19 +7,23 @@ use tunnel::tun::TunSocket;
 
 pub fn main() {
     let args: Vec<String> = env::args().collect();
-    let (name, remote_addr, is_client, port) = parse_args(args);
+    let (name, remote_addr, key, is_client, port) = parse_args(args);
     if is_client && remote_addr == "" {
         panic!("You must supply a server ip and port number for a client");
     }
+    if key.len() > 32 {
+        panic!("Password length must be less than or equal to 32");
+    }
 
-    let net = Net::new(&remote_addr, port, is_client).unwrap();
+    let net = Net::new(&remote_addr, port, is_client, key).unwrap();
     let tunnel = TunSocket::new(&name).unwrap();
     run(net, tunnel);
 }
 
-fn parse_args(args: Vec<String>) -> (String, String, bool, u16) {
+fn parse_args(args: Vec<String>) -> (String, String, String, bool, u16) {
     let mut name = String::from("playtun");
     let mut remote_addr = String::from("");
+    let mut key = String::from("");
     let mut is_client = false;
     let mut port = 2000;
     let mut i = 1;
@@ -30,22 +34,24 @@ fn parse_args(args: Vec<String>) -> (String, String, bool, u16) {
             continue;
         }
 
-        if (args[i] == "--name" || args[i] == "-n") && i+1 < args.len() {
-            name = args[i+1].clone();
+        if (args[i] == "--name" || args[i] == "-n") && i + 1 < args.len() {
+            name = args[i + 1].clone();
         }
 
-        
-
-        if (args[i] == "--address" || args[i] == "-a") && i+1 < args.len() {
-            remote_addr = args[i+1].clone();
+        if (args[i] == "--address" || args[i] == "-a") && i + 1 < args.len() {
+            remote_addr = args[i + 1].clone();
         }
 
-        if (args[i] == "--port" || args[i] == "-p") && i+1 < args.len() {
-            port = args[i+1].parse().unwrap();
+        if (args[i] == "--port" || args[i] == "-p") && i + 1 < args.len() {
+            port = args[i + 1].parse().unwrap();
+        }
+
+        if (args[i] == "--key" || args[i] == "-k") && i + 1 < args.len() {
+            key = args[i + 1].clone();
         }
         i += 2;
     }
-    return (name, remote_addr, is_client, port)
+    return (name, remote_addr, key, is_client, port);
 }
 
 fn run(mut net: Net, tunnel: TunSocket) {

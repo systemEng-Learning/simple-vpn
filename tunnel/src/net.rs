@@ -1,22 +1,47 @@
 use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::vec;
 use std::{
     io,
     os::fd::{AsRawFd, RawFd},
 };
 
-use etherparse::{Ipv4HeaderSlice, checksum};
+use etherparse::{checksum, Ipv4HeaderSlice};
+use ring::aead::Aad;
+use ring::aead::BoundKey;
+use ring::aead::Nonce;
+use ring::aead::NonceSequence;
+use ring::aead::OpeningKey;
+use ring::aead::SealingKey;
+use ring::aead::UnboundKey;
+use ring::aead::AES_256_GCM;
+use ring::aead::NONCE_LEN;
+use ring::error::Unspecified;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
 use crate::tunerror;
 
 const IPV4_HEADER_LEN: usize = 20;
 
+struct CounterNonceSequence(u32);
+
+impl NonceSequence for CounterNonceSequence {
+    fn advance(&mut self) -> Result<Nonce, Unspecified> {
+        let mut nonce_bytes = vec![0; NONCE_LEN];
+
+        let bytes = self.0.to_be_bytes();
+        nonce_bytes[8..].copy_from_slice(&bytes);
+        self.0 += 1;
+        Nonce::try_assume_unique_for_key(&nonce_bytes)
+    }
+}
+
 pub struct Net {
     fd: RawFd,
     pub socket: Socket,
     ip_map: Option<HashMap<Ipv4Addr, SockAddr>>,
+    key: Vec<u8>,
 }
 
 impl AsRawFd for Net {
@@ -26,10 +51,25 @@ impl AsRawFd for Net {
 }
 
 impl Net {
-    pub fn new(remote_addr: &str, port: u16, is_client: bool) -> Result<Net, io::Error> {
+    pub fn new(
+        remote_addr: &str,
+        port: u16,
+        is_client: bool,
+        key: String,
+    ) -> Result<Net, io::Error> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
         let net: Net;
         socket.set_reuse_address(true)?;
+        let mut key_bytes;
+        if key.len() > 0 {
+            key_bytes = vec![0; AES_256_GCM.key_len()];
+            for (i, b) in key.bytes().enumerate() {
+                key_bytes[i] = b;
+            }
+        } else {
+            key_bytes = vec![];
+        }
+
         if is_client {
             let address: SocketAddr = remote_addr.parse().unwrap();
             let address = address.into();
@@ -38,6 +78,7 @@ impl Net {
                 fd: socket.as_raw_fd(),
                 socket: socket,
                 ip_map: None,
+                key: key_bytes,
             };
         } else {
             let bind_addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port).into();
@@ -47,6 +88,7 @@ impl Net {
                 fd: socket.as_raw_fd(),
                 socket: socket,
                 ip_map: Some(map),
+                key: key_bytes,
             };
         }
         Ok(net)
@@ -57,7 +99,12 @@ impl Net {
         if version != 4 {
             return 0;
         }
-        let new_size = Self::encrypt(buf, size);
+        let mut new_size = size;
+        if self.key.len() > 0 {
+            new_size = self
+                .encrypt(buf, size)
+                .expect("Encryption process had an error");
+        }
         let buf = &buf[..new_size];
         if self.ip_map.is_none() {
             let _ = self.socket.send(buf).unwrap();
@@ -76,17 +123,26 @@ impl Net {
         new_size
     }
 
-    fn encrypt(buf: &mut [u8], size: usize) -> usize {
+    fn encrypt(&self, buf: &mut [u8], size: usize) -> Result<usize, Unspecified> {
         let mut length = u16::from_be_bytes([buf[2], buf[3]]);
-        buf[size] = 5;
-        length += 1;
+        length += AES_256_GCM.tag_len() as u16;
         let bytes = length.to_be_bytes();
         buf[2] = bytes[0];
         buf[3] = bytes[1];
         let mut header_length = (buf[0] & 15) as usize;
         header_length *= 4;
-        Self::set_header_checksum(&mut buf[..header_length]);
-        size + 1
+        self.set_header_checksum(&mut buf[..header_length]);
+        let unbound_key = UnboundKey::new(&AES_256_GCM, &self.key)?;
+        let nonce_sequence = CounterNonceSequence(1);
+        let mut sealing_key = SealingKey::new(unbound_key, nonce_sequence);
+        let associated_data = Aad::empty();
+
+        let tag = sealing_key
+            .seal_in_place_separate_tag(associated_data, &mut buf[header_length..size])?;
+        for i in 0..AES_256_GCM.tag_len() {
+            buf[size + i] = tag.as_ref()[i];
+        }
+        Ok(size + AES_256_GCM.tag_len())
     }
 
     pub fn recv(&mut self) -> Result<(Vec<u8>, usize), tunerror::Error> {
@@ -97,40 +153,50 @@ impl Net {
         if version != 4 {
             return Err(tunerror::Error::Message("Invalid packet".to_owned()));
         }
-        let new_size = Self::decrypt(&mut buf, amount);
+        let mut new_size = amount;
+        if self.key.len() > 0 {
+            new_size = self
+                .decrypt(&mut buf, amount)
+                .expect("Decryption process had an error");
+        }
         if self.ip_map.is_some() {
             let slice = Ipv4HeaderSlice::from_slice(&buf[..new_size]);
             match slice {
                 Ok(header) => {
                     let source_ip = header.source_addr();
                     self.ip_map.as_mut().unwrap().insert(source_ip, remote_sock);
-                },
-                Err(e) => { 
-                    println!("{:?}", e); 
-                    return Err(tunerror::Error::Message("Invalid packet".to_owned()))
-                },
+                }
+                Err(e) => {
+                    println!("{:?}", e);
+                    return Err(tunerror::Error::Message("Invalid packet".to_owned()));
+                }
             }
         }
         let buf_vec = buf[..new_size].to_vec();
         Ok((buf_vec, amount))
     }
 
-    fn decrypt(buf: &mut [u8], size: usize) -> usize {
+    fn decrypt(&self, buf: &mut [u8], size: usize) -> Result<usize, Unspecified> {
         let mut length = u16::from_be_bytes([buf[2], buf[3]]);
-        length -= 1;
+        length -= AES_256_GCM.tag_len() as u16;
         let bytes = length.to_be_bytes();
         buf[2] = bytes[0];
         buf[3] = bytes[1];
         let mut header_length = (buf[0] & 15) as usize;
         header_length *= 4;
-        Self::set_header_checksum(&mut buf[..header_length]);
-        size - 1
+        self.set_header_checksum(&mut buf[..header_length]);
+        let unbound_key = UnboundKey::new(&AES_256_GCM, &self.key)?;
+        let nonce_sequence = CounterNonceSequence(1);
+        let mut opening_key = OpeningKey::new(unbound_key, nonce_sequence);
+        let associated_data = Aad::empty();
+        let _ = opening_key.open_in_place(associated_data, &mut buf[header_length..size])?;
+        Ok(size - AES_256_GCM.tag_len())
     }
 
-    fn set_header_checksum(buf: &mut [u8]) {
+    fn set_header_checksum(&self, buf: &mut [u8]) {
         let mut csum = checksum::Sum16BitWords::new();
         for x in (0..10).step_by(2) {
-            csum = csum.add_2bytes([buf[x], buf[x+1]]);
+            csum = csum.add_2bytes([buf[x], buf[x + 1]]);
         }
         csum = csum.add_4bytes([buf[12], buf[13], buf[14], buf[15]]);
         csum = csum.add_4bytes([buf[16], buf[17], buf[18], buf[19]]);

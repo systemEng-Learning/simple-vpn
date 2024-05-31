@@ -83,9 +83,9 @@ impl TunSocket {
     pub fn write(&self, buf: &[u8]) -> usize {
         match unsafe { write(self.fd, buf.as_ptr() as _, buf.len() as _) } {
             -1 => {
-                    println!("{:?}", Error::IfaceRead(io::Error::last_os_error()));
-                    0
-            },
+                println!("{:?}", Error::IfaceRead(io::Error::last_os_error()));
+                0
+            }
             n => n as usize,
         }
     }

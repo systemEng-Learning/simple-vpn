@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 etherparse = "0.14.3"
 libc = "0.2.155"
+ring = "0.17.8"
 socket2 = "0.5.7"
 thiserror = "1.0.61"
