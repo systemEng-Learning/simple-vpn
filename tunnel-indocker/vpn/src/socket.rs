@@ -35,14 +35,13 @@ impl Drop for SocketFd {
 }
 
 impl SocketFd {
-    pub fn new(is_server: bool) -> Result<SocketFd, Error> {
+    pub fn new(port: u16) -> Result<SocketFd, Error> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).unwrap();
 
-        if is_server {
-            let socket_addr = SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 8080);
-            socket.set_reuse_address(true)?;
-            socket.bind(&socket_addr.into())?;
-        }
+        let socket_addr = SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), port);
+
+        socket.set_reuse_address(true)?;
+        socket.bind(&socket_addr.into())?;
 
         socket.set_nonblocking(true)?;
         Ok(SocketFd {

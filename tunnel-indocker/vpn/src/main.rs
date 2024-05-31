@@ -5,6 +5,7 @@ use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, BorrowedFd};
 use vpn::{SocketFd, TunSocket};
 
+
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -16,6 +17,8 @@ struct Cli {
     ip_peer: Option<String>,
     #[arg(short, long)]
     port: Option<u16>,
+    #[arg(short, long)]
+    local_port: Option<u16>,
 }
 
 pub fn main() {
@@ -28,8 +31,9 @@ pub fn main() {
 
     let ip_peer = cli
         .ip_peer
-        .unwrap_or_else(|| "Please specify --ip-peer e.g 172.26.0.3".to_string());
+        .unwrap_or_else(|| "Please specify --ip e.g 172.26.0.3".to_string());
     let port = cli.port.unwrap_or(8080);
+    let local_port = cli.local_port.unwrap_or(8080);
 
     if ip_peer.parse::<Ipv4Addr>().is_err() {
         eprintln!("Invalid IP address");
@@ -47,6 +51,7 @@ pub fn main() {
             ip_peer,
             true,
             port,
+            local_port,
         );
     } else if cli.client {
         run_tun(
@@ -55,22 +60,30 @@ pub fn main() {
             ip_peer,
             false,
             port,
+            local_port,
         );
     } else {
         eprintln!("Please specify either --client or --server");
     }
 }
 
-fn run_tun(tun_name: &str, local_ip: Ipv4Addr, ip_peer: Ipv4Addr, is_server: bool, port: u16) {
+fn run_tun(
+    tun_name: &str,
+    local_ip: Ipv4Addr,
+    ip_peer: Ipv4Addr,
+    is_server: bool,
+    port: u16,
+    local_port: u16,
+) {
     let tun = TunSocket::new(tun_name).unwrap();
     tun.set_address(local_ip).unwrap();
     tun.set_netmask(Ipv4Addr::new(255, 255, 255, 0)).unwrap();
     tun.enabled(true).unwrap();
 
     let socket = if is_server {
-        SocketFd::new(true).unwrap() // Server binds to a specific port
+        SocketFd::new(local_port).unwrap() // Server binds to a specific port
     } else {
-        SocketFd::new(false).unwrap() // Client does not bind to a specific port
+        SocketFd::new(local_port).unwrap() // Client does not bind to a specific port
     };
 
     let tun_fd = unsafe { BorrowedFd::borrow_raw(tun.as_raw_fd()) };
@@ -125,3 +138,4 @@ fn run_tun(tun_name: &str, local_ip: Ipv4Addr, ip_peer: Ipv4Addr, is_server: boo
         }
     }
 }
+
