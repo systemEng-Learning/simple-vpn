@@ -1,10 +1,11 @@
 use crate::tunerror::Error;
-use etherparse::Ipv4HeaderSlice;
+use etherparse::{Ipv4HeaderSlice, Ipv6HeaderSlice};
 use libc::close;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use std::io;
 use std::mem::MaybeUninit;
 use std::net::Ipv4Addr;
-use std::net::{SocketAddr, UdpSocket};
+use std::net::SocketAddr;
 use std::os::unix::io::{AsRawFd, IntoRawFd, RawFd};
 
 #[derive(Default, Debug)]
@@ -34,11 +35,15 @@ impl Drop for SocketFd {
 }
 
 impl SocketFd {
-    pub fn new() -> Result<SocketFd, Error> {
+    pub fn new(is_server: bool) -> Result<SocketFd, Error> {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)).unwrap();
-        let socket_addr = SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 12345);
-        socket.set_reuse_address(true)?;
-        socket.bind(&socket_addr.into())?;
+
+        if is_server {
+            let socket_addr = SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 8080);
+            socket.set_reuse_address(true)?;
+            socket.bind(&socket_addr.into())?;
+        }
+
         socket.set_nonblocking(true)?;
         Ok(SocketFd {
             fd: socket.as_raw_fd(),
@@ -66,11 +71,31 @@ impl SocketFd {
         // Safety: the `recv_from` implementation promises not to write uninitialised
         // bytes to the buffer, so this casting is safe.
         let src_buf = unsafe { &mut *(&mut buf[..] as *mut [u8] as *mut [MaybeUninit<u8>]) };
-        let (amount, _) = self.socket.as_ref().unwrap().recv_from(src_buf).unwrap();
-        let slice = Ipv4HeaderSlice::from_slice(&buf[0..amount]).unwrap();
-        let header_len = (slice.total_len() - slice.payload_len()) as usize;
-        let new_payload = &buf[header_len..amount];
-        let ty = new_payload.to_vec();
-        Ok((amount, ty))
+        let (amount, recvraddr) = self.socket.as_ref().unwrap().recv_from(src_buf)?;
+        let ip_version = buf[0] >> 4;
+
+        println!("Received receieved from {:?}", recvraddr);
+
+        let new_payload = match ip_version {
+            4 => {
+                let slice = Ipv4HeaderSlice::from_slice(&buf[..amount]).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "failed to parse IPv4 header")
+                })?;
+                let header_len = slice.ihl() as usize * 4;
+                &buf
+            }
+            6 => {
+                let slice = Ipv6HeaderSlice::from_slice(&buf[0..amount]).map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "failed to parse IPv6 header")
+                })?;
+                let header_len = slice.payload_length() as usize;
+                &buf
+            }
+            _ => {
+                return Err(Error::IfaceRead(io::Error::last_os_error()));
+            }
+        };
+
+        Ok((amount, new_payload.to_vec()))
     }
 }
