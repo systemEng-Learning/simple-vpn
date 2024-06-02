@@ -1,0 +1,32 @@
+version: '3.8'
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    volumes:
+      - ./vpn:/vpn
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "8080:8080/udp"
+
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    
+    volumes:
+      - ./vpn:/vpn
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+    ports:
+      - "5005:5005/udp"
+    
+networks:
+  my-network:  # Define a custom network for both services
+    external: true  # Allow containers to access host network 172.26.0.1
