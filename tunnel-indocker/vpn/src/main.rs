@@ -120,7 +120,7 @@ fn run_tun(
                             if recv_amount > 0 {
                                 //print out something here
                                 println!("Received {} bytes from socket", recv_amount);
-                                let amount = tun.write(&recv_buf);
+                                let amount = tun.write(&recv_buf[0..recv_amount]);
                                 println!("Wrote {} bytes to tun", amount);
                             }
                         }

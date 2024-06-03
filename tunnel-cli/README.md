@@ -3,9 +3,10 @@
 To run as a server, you can run it with the following optional config options:
 * `--name` or `-n`: Name of the tun device you want to create. Default playtun
 * `--port` or `-p`: UDP port. Default 2000
-To run a tunnel server with name simpletun and port 3456 with cargo, it'd be like this
+* `--key` or `-k`: Password for encryption and decryption
+To run a tunnel server with name simpletun, port 3456, and password wordpass with cargo, it'd be like this
 ```sh
-    cargo run -- --name simpletun --port 3456
+    cargo run -- --name simpletun --port 3456 --key wordpass
 ```
 That's it
 
@@ -13,7 +14,7 @@ That's it
 To run as a client you must run with the following options:
 * `--client` or `-c`: Just calling this runs the tunnel as a client.
 * `--address` or `-a`: Sets the ip address and port of the server.
-To run a client with name clienttun and tunnelserver 12.93.9.75:3456, it'd be like this
+To run a client with name clienttun, tunnelserver 12.93.9.75:3456, and password, it'd be like this
 ```sh
     cargo run -- --client --name clienttun --address 12.93.9.75:3456
 ```
