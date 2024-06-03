@@ -63,7 +63,7 @@ impl TunSocket {
 
         unsafe {
             ptr::copy_nonoverlapping(
-                dev_name_bytes.as_ptr(),
+                dev_name_bytes.as_ptr() as *mut i8,
                 ifr.ifr_name.as_mut_ptr(),
                 dev_name_bytes.len(),
             );
@@ -112,7 +112,7 @@ impl TunSocket {
         unsafe {
             ptr::copy_nonoverlapping(
                 self.name.as_bytes().as_ptr(),
-                ifr.ifr_name.as_mut_ptr(),
+                ifr.ifr_name.as_mut_ptr() as *mut u8,
                 self.name.len(),
             );
         }
