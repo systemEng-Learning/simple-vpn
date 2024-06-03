@@ -1,7 +1,6 @@
 use clap::Parser;
 use nix::sys::select::{select, FdSet};
 use std::net::Ipv4Addr;
-use std::net::Ipv4Addr;
 use std::os::unix::io::{AsRawFd, BorrowedFd};
 use vpn::{SocketFd, TunSocket};
 
