@@ -1,0 +1,10 @@
+[package]
+name = "localhost-tunnel"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+mio = { version = "0.8.11", features = ["net", "os-poll"]}
+clap = {version = "4.5.4", features = [ "derive" ]}
