@@ -121,7 +121,7 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8]) {
                     net2tun += 1;
                     let (mut buf, amt) = net.recv().unwrap();
                     println!("NET2TUN {net2tun}: Read {amt} from network");
-                    if is_client {
+                    if is_client && packet::get_version(&buf) == 4 {
                         packet::change_address(&mut buf, &[127, 0, 0, 1], false);
                     }
                     if is_client || !packet::is_handshake_packet(buf.as_slice()) {
@@ -134,7 +134,7 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8]) {
                     tun2net += 1;
                     let amt = tunnel.read(&mut dst).unwrap();
                     println!("TUN2NET {tun2net}: Read {amt} from tunnel");
-                    if is_client {
+                    if is_client && packet::get_version(&dst) == 4 {
                         packet::change_address(&mut dst, local_ip, true);
                     }
                     let amt = net.send(&mut dst, amt);

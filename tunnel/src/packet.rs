@@ -50,3 +50,7 @@ pub fn set_header_checksum(buf: &mut [u8]) {
     buf[10] = sum[0];
     buf[11] = sum[1];
 }
+
+pub fn get_version(buf: &[u8]) -> u8 {
+    buf[0] >> 4
+}
