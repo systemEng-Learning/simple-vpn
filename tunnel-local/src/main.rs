@@ -10,6 +10,9 @@ use tunnel::tun::TunSocket;
 pub fn main() {
     let args: Vec<String> = env::args().collect();
     let (name, remote_addr, local_ip, key, is_client, port, host_port) = parse_args(args);
+    if local_ip == "" {
+        panic!("You must supply a tun dev ip address");
+    }
     if is_client && remote_addr == "" {
         panic!("You must supply a server ip and port number for a client");
     }
@@ -20,10 +23,11 @@ pub fn main() {
     let mut net = Net::new(&remote_addr, port, is_client, key).unwrap();
     let tunnel = TunSocket::new(&name).unwrap();
     setup_link_dev(&name, &local_ip);
+    let local_ip = parse_ip(local_ip);
     if is_client {
         client_handshake(&mut net, &local_ip)
     }
-    run(net, tunnel, is_client);
+    run(net, tunnel, is_client, &local_ip);
 }
 
 fn parse_args(args: Vec<String>) -> (String, String, String, String, bool, u16, u16) {
@@ -33,7 +37,7 @@ fn parse_args(args: Vec<String>) -> (String, String, String, String, bool, u16, 
     let mut local_ip = String::from("");
     let mut is_client = false;
     let mut port = 2000;
-    let mut host_port = 8000;
+    let mut host_port = 8080;
     let mut i = 1;
     while i < args.len() {
         if args[i] == "--client" || args[i] == "--c" {
@@ -80,12 +84,16 @@ fn setup_link_dev(name: &str, ip_addr: &str) {
         .expect("Failed to execute process");
 }
 
-fn client_handshake(net: &mut Net, local_ip: &str) {
-    let mut iter = local_ip.split('.');
+fn parse_ip(ip: String) -> Vec<u8> {
+    let mut iter = ip.split('.');
     let mut ip = vec![];
     while let Some(c) = iter.next() {
         ip.push(c.parse::<u8>().unwrap());
     }
+    ip
+}
+
+fn client_handshake(net: &mut Net, ip: &[u8]) {
     let hello_packet = packet::create_handshake_packet(&ip[..4].try_into().unwrap());
     let mut dst: [u8; 4096] = [0; 4096];
     for i in 0..hello_packet.len() {
@@ -95,7 +103,7 @@ fn client_handshake(net: &mut Net, local_ip: &str) {
     println!("HANDSHAKE: Written {amt} to network");
 }
 
-fn run(mut net: Net, tunnel: TunSocket, is_client: bool) {
+fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8]) {
     let mut tun2net = 0;
     let mut net2tun = 0;
     loop {
@@ -111,8 +119,11 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool) {
                 println!("select result: {res}");
                 if fdset.is_set(net_fd) {
                     net2tun += 1;
-                    let (buf, amt) = net.recv().unwrap();
+                    let (mut buf, amt) = net.recv().unwrap();
                     println!("NET2TUN {net2tun}: Read {amt} from network");
+                    if is_client {
+                        packet::change_address(&mut buf, &[127, 0, 0, 1], false);
+                    }
                     if is_client || !packet::is_handshake_packet(buf.as_slice()) {
                         let amt = tunnel.write(buf.as_slice());
                         println!("NET2TUN {net2tun}: Written {amt} to tunnel");
@@ -123,6 +134,9 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool) {
                     tun2net += 1;
                     let amt = tunnel.read(&mut dst).unwrap();
                     println!("TUN2NET {tun2net}: Read {amt} from tunnel");
+                    if is_client {
+                        packet::change_address(&mut dst, local_ip, true);
+                    }
                     let amt = net.send(&mut dst, amt);
                     println!("TUN2NET {tun2net}: Written {amt} to network");
                 }
