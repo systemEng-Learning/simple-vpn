@@ -34,11 +34,11 @@ pub fn change_address_and_port(buf: &mut [u8], addr: &[u8], port: u16, is_source
     let result_port;
     let port = port.to_be().to_be_bytes();
     if is_source {
-        result_port = u16::from_be_bytes([buf[ip_header_length], buf[ip_header_length + 1]]);
+        result_port = 0;
         buf[ip_header_length] = port[0];
         buf[ip_header_length + 1] = port[1];
     } else {
-        result_port = 0;
+        result_port = u16::from_be_bytes([buf[ip_header_length], buf[ip_header_length + 1]]);
         buf[ip_header_length + 2] = port[0];
         buf[ip_header_length + 3] = port[1];
     }
