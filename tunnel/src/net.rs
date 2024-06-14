@@ -20,8 +20,8 @@ use ring::aead::NONCE_LEN;
 use ring::error::Unspecified;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
-use crate::tunerror;
 use crate::packet;
+use crate::tunerror;
 const IPV6_HEADER_LEN: usize = 40;
 
 struct CounterNonceSequence(u32);
@@ -174,7 +174,10 @@ impl Net {
                 match slice {
                     Ok(header) => {
                         let source_ip = header.source_addr();
-                        self.ip_map.as_mut().unwrap().insert(IpAddr::V4(source_ip), remote_sock);
+                        self.ip_map
+                            .as_mut()
+                            .unwrap()
+                            .insert(IpAddr::V4(source_ip), remote_sock);
                     }
                     Err(e) => {
                         println!("{:?}", e);
@@ -186,7 +189,10 @@ impl Net {
                 match slice {
                     Ok(header) => {
                         let source_ip = header.source_addr();
-                        self.ip_map.as_mut().unwrap().insert(IpAddr::V6(source_ip), remote_sock);
+                        self.ip_map
+                            .as_mut()
+                            .unwrap()
+                            .insert(IpAddr::V6(source_ip), remote_sock);
                     }
                     Err(e) => {
                         println!("{:?}", e);
@@ -212,7 +218,7 @@ impl Net {
 
     /// Sets a new length; the length increases if it's an encryption process, else it decreases.
     /// The IPv4 header format https://en.wikipedia.org/wiki/IPv4#Header helps us know where
-    /// the needed data is stored for ipv4 packets. The IPv4 header format 
+    /// the needed data is stored for ipv4 packets. The IPv4 header format
     /// https://en.wikipedia.org/wiki/IPv6_packet#Fixed_header helps us know where. Returns the header length
     fn configure_header(&self, buf: &mut [u8], version: u8, is_encrypt: bool) -> usize {
         let mut length;

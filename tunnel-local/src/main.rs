@@ -27,7 +27,7 @@ pub fn main() {
     if is_client {
         client_handshake(&mut net, &local_ip)
     }
-    run(net, tunnel, is_client, &local_ip);
+    run(net, tunnel, is_client, &local_ip, host_port);
 }
 
 fn parse_args(args: Vec<String>) -> (String, String, String, String, bool, u16, u16) {
@@ -103,9 +103,10 @@ fn client_handshake(net: &mut Net, ip: &[u8]) {
     println!("HANDSHAKE: Written {amt} to network");
 }
 
-fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8]) {
+fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8], host_port: u16) {
     let mut tun2net = 0;
     let mut net2tun = 0;
+    let mut port = 0;
     loop {
         let mut fdset = FdSet::new();
         let net_fd = net.as_raw_fd();
@@ -122,7 +123,12 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8]) {
                     let (mut buf, amt) = net.recv().unwrap();
                     println!("NET2TUN {net2tun}: Read {amt} from network");
                     if is_client && packet::get_version(&buf) == 4 {
-                        packet::change_address(&mut buf, &[127, 0, 0, 1], false);
+                        port = packet::change_address_and_port(
+                            &mut buf,
+                            &[127, 0, 0, 1],
+                            host_port,
+                            false,
+                        );
                     }
                     if is_client || !packet::is_handshake_packet(buf.as_slice()) {
                         let amt = tunnel.write(buf.as_slice());
@@ -135,7 +141,7 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8]) {
                     let amt = tunnel.read(&mut dst).unwrap();
                     println!("TUN2NET {tun2net}: Read {amt} from tunnel");
                     if is_client && packet::get_version(&dst) == 4 {
-                        packet::change_address(&mut dst, local_ip, true);
+                        let _ = packet::change_address_and_port(&mut dst, local_ip, port, true);
                     }
                     let amt = net.send(&mut dst, amt);
                     println!("TUN2NET {tun2net}: Written {amt} to network");
