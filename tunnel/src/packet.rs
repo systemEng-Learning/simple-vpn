@@ -28,17 +28,17 @@ pub fn change_address_and_port(buf: &mut [u8], addr: &[u8], port: u16, is_source
     buf[13 + offset] = addr[1];
     buf[14 + offset] = addr[2];
     buf[15 + offset] = addr[3];
-    set_header_checksum(buf);
     let mut ip_header_length = (buf[0] & 15) as usize;
     ip_header_length *= 4;
+    set_header_checksum(&mut buf[..ip_header_length]);
     let result_port;
-    let port = port.to_be().to_be_bytes();
+    let port = port.to_be_bytes();
     if is_source {
         result_port = 0;
         buf[ip_header_length] = port[0];
         buf[ip_header_length + 1] = port[1];
     } else {
-        result_port = u16::from_be_bytes([buf[ip_header_length], buf[ip_header_length + 1]]);
+        result_port = u16::from_be_bytes([buf[ip_header_length+2], buf[ip_header_length + 3]]);
         buf[ip_header_length + 2] = port[0];
         buf[ip_header_length + 3] = port[1];
     }
