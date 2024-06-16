@@ -22,12 +22,12 @@ pub fn main() {
 
     let mut net = Net::new(&remote_addr, port, is_client, key).unwrap();
     let tunnel = TunSocket::new(&name).unwrap();
-    setup_link_dev(&name, &local_ip, is_client);
+    setup_link_dev(&name, &local_ip, host_port, is_client);
     let local_ip = parse_ip(local_ip);
     if is_client {
         client_handshake(&mut net, &local_ip)
     }
-    run(net, tunnel, is_client, &local_ip, host_port);
+    run(net, tunnel, is_client);
 }
 
 fn parse_args(args: Vec<String>) -> (String, String, String, String, bool, u16, u16) {
@@ -75,17 +75,29 @@ fn parse_args(args: Vec<String>) -> (String, String, String, String, bool, u16, 
     return (name, remote_addr, local_ip, key, is_client, port, host_port);
 }
 
-fn setup_link_dev(name: &str, ip_addr: &str, is_client: bool) {
-    let mut command = format!("ip link set dev {name} up; ip addr add {ip_addr}/24 dev {name}");
-    if is_client {
-        command = format!("{command}; sysctl -w net.ipv4.conf.{name}.route_localnet=1");
-    }
+fn setup_link_dev(name: &str, ip_addr: &str, host_port: u16, is_client: bool) {
+    let command = format!("ip link set dev {name} up; ip addr add {ip_addr}/24 dev {name}");
     let _ = Command::new("sh")
         .arg("-c")
         .arg(command)
         .output()
         .expect("Failed to execute process");
 
+    if is_client {
+        let command = format!(
+            "iptables -A FORWARD -i {name} -o lo -p tcp --syn -m conntrack --ctstate NEW -j ACCEPT"
+        );
+        let command = format!("{command}; iptables -A FORWARD -i {name} -o lo -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
+        let command = format!("{command}; iptables -A FORWARD -i lo -o {name} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
+        let command = format!("{command}; iptables -t nat -A PREROUTING -i {name} -p tcp -j DNAT --to-destination 127.0.0.1:{host_port}");
+        let command = format!("{command}; iptables -t nat -A POSTROUTING -o lo -p tcp --dport {host_port} -d 127.0.0.1 -j SNAT --to-source 127.0.0.1");
+        let command = format!("{command}; sysctl -w net.ipv4.conf.{name}.route_localnet=1");
+        let _ = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .expect("Failed to execute process");
+    }
 }
 
 fn parse_ip(ip: String) -> Vec<u8> {
@@ -107,10 +119,9 @@ fn client_handshake(net: &mut Net, ip: &[u8]) {
     println!("HANDSHAKE: Written {amt} to network");
 }
 
-fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8], host_port: u16) {
+fn run(mut net: Net, tunnel: TunSocket, is_client: bool) {
     let mut tun2net = 0;
     let mut net2tun = 0;
-    let mut port = 0;
     loop {
         let mut fdset = FdSet::new();
         let net_fd = net.as_raw_fd();
@@ -124,16 +135,8 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8], host_p
                 println!("select result: {res}");
                 if fdset.is_set(net_fd) {
                     net2tun += 1;
-                    let (mut buf, amt) = net.recv().unwrap();
+                    let (buf, amt) = net.recv().unwrap();
                     println!("NET2TUN {net2tun}: Read {amt} from network");
-                    if is_client && packet::get_version(&buf) == 4 {
-                        port = packet::change_address_and_port(
-                            &mut buf,
-                            &[127, 0, 0, 1],
-                            host_port,
-                            false,
-                        );
-                    }
                     if is_client || !packet::is_handshake_packet(buf.as_slice()) {
                         let amt = tunnel.write(buf.as_slice());
                         println!("NET2TUN {net2tun}: Written {amt} to tunnel");
@@ -144,9 +147,6 @@ fn run(mut net: Net, tunnel: TunSocket, is_client: bool, local_ip: &[u8], host_p
                     tun2net += 1;
                     let amt = tunnel.read(&mut dst).unwrap();
                     println!("TUN2NET {tun2net}: Read {amt} from tunnel");
-                    if is_client && packet::get_version(&dst) == 4 {
-                        let _ = packet::change_address_and_port(&mut dst, local_ip, port, true);
-                    }
                     let amt = net.send(&mut dst, amt);
                     println!("TUN2NET {tun2net}: Written {amt} to network");
                 }
