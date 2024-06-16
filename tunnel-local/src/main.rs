@@ -106,7 +106,7 @@ fn setup_link_dev(name: &str, ip_addr: &str, host_port: u16, is_client: bool) {
     let mut command = format!("ip link set dev {name} up; ip addr add {ip_addr}/24 dev {name}");
     if is_client {
         command = format!(
-            "iptables -A FORWARD -i {name} -o lo -p tcp --syn -m conntrack --ctstate NEW -j ACCEPT"
+            "{command}; iptables -A FORWARD -i {name} -o lo -p tcp --syn -m conntrack --ctstate NEW -j ACCEPT"
         );
         command = format!("{command}; iptables -A FORWARD -i {name} -o lo -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
         command = format!("{command}; iptables -A FORWARD -i lo -o {name} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
