@@ -7,7 +7,7 @@ use std::{
     os::fd::{AsRawFd, RawFd},
 };
 
-use etherparse::{checksum, Ipv4HeaderSlice, Ipv6HeaderSlice};
+use etherparse::{Ipv4HeaderSlice, Ipv6HeaderSlice};
 use ring::aead::Aad;
 use ring::aead::BoundKey;
 use ring::aead::Nonce;
@@ -20,9 +20,8 @@ use ring::aead::NONCE_LEN;
 use ring::error::Unspecified;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 
+use crate::packet;
 use crate::tunerror;
-
-const IPV4_HEADER_LEN: usize = 20;
 const IPV6_HEADER_LEN: usize = 40;
 
 struct CounterNonceSequence(u32);
@@ -175,7 +174,10 @@ impl Net {
                 match slice {
                     Ok(header) => {
                         let source_ip = header.source_addr();
-                        self.ip_map.as_mut().unwrap().insert(IpAddr::V4(source_ip), remote_sock);
+                        self.ip_map
+                            .as_mut()
+                            .unwrap()
+                            .insert(IpAddr::V4(source_ip), remote_sock);
                     }
                     Err(e) => {
                         println!("{:?}", e);
@@ -187,7 +189,10 @@ impl Net {
                 match slice {
                     Ok(header) => {
                         let source_ip = header.source_addr();
-                        self.ip_map.as_mut().unwrap().insert(IpAddr::V6(source_ip), remote_sock);
+                        self.ip_map
+                            .as_mut()
+                            .unwrap()
+                            .insert(IpAddr::V6(source_ip), remote_sock);
                     }
                     Err(e) => {
                         println!("{:?}", e);
@@ -213,7 +218,7 @@ impl Net {
 
     /// Sets a new length; the length increases if it's an encryption process, else it decreases.
     /// The IPv4 header format https://en.wikipedia.org/wiki/IPv4#Header helps us know where
-    /// the needed data is stored for ipv4 packets. The IPv4 header format 
+    /// the needed data is stored for ipv4 packets. The IPv4 header format
     /// https://en.wikipedia.org/wiki/IPv6_packet#Fixed_header helps us know where. Returns the header length
     fn configure_header(&self, buf: &mut [u8], version: u8, is_encrypt: bool) -> usize {
         let mut length;
@@ -234,30 +239,12 @@ impl Net {
             buf[3] = bytes[1];
             header_length = (buf[0] & 15) as usize;
             header_length *= 4;
-            self.set_header_checksum(&mut buf[..header_length]);
+            packet::set_header_checksum(&mut buf[..header_length]);
         } else {
             buf[4] = bytes[0];
             buf[5] = bytes[1];
             header_length = IPV6_HEADER_LEN;
         }
         header_length
-    }
-
-    /// Due to the length change done by the encryption/decryption process, a new header checksum has
-    /// to be calculated. This prevents the kernel from dropping our encrypted/decrypted packets.
-    /// This also sets the checksum in the packet bytes indexes.
-    fn set_header_checksum(&self, buf: &mut [u8]) {
-        let mut csum = checksum::Sum16BitWords::new();
-        for x in (0..10).step_by(2) {
-            csum = csum.add_2bytes([buf[x], buf[x + 1]]);
-        }
-        csum = csum.add_4bytes([buf[12], buf[13], buf[14], buf[15]]);
-        csum = csum.add_4bytes([buf[16], buf[17], buf[18], buf[19]]);
-        if buf.len() > IPV4_HEADER_LEN {
-            csum = csum.add_slice(&buf[IPV4_HEADER_LEN..]);
-        }
-        let sum = csum.ones_complement().to_be().to_be_bytes();
-        buf[10] = sum[0];
-        buf[11] = sum[1];
     }
 }
