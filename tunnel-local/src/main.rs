@@ -91,6 +91,7 @@ fn setup_link_dev(name: &str, ip_addr: &str, host_port: u16, is_client: bool) {
         let command = format!("{command}; iptables -A FORWARD -i lo -o {name} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
         let command = format!("{command}; iptables -t nat -A PREROUTING -i {name} -p tcp -j DNAT --to-destination 127.0.0.1:{host_port}");
         let command = format!("{command}; iptables -t nat -A POSTROUTING -o lo -p tcp --dport {host_port} -d 127.0.0.1 -j SNAT --to-source 127.0.0.1");
+        let command = format!("{command}; sysctl -w net.ipv4.conf.{name}.route_localnet=1");
         let _ = Command::new("sh")
             .arg("-c")
             .arg(command)
