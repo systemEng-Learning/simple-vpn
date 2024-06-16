@@ -7,6 +7,32 @@ use tunnel::packet;
 use tunnel::select::{select, FdSet};
 use tunnel::tun::TunSocket;
 
+struct Cleanup {
+    is_client: bool,
+    host_port: u16,
+    name: String
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        if !self.is_client {
+            return;
+        }
+        let command = format!(
+            "iptables -D FORWARD -i {} -o lo -p tcp --syn -m conntrack --ctstate NEW -j ACCEPT", self.name
+        );
+        let command = format!("{command}; iptables -D FORWARD -i {} -o lo -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT", self.name);
+        let command = format!("{command}; iptables -D FORWARD -i lo -o {} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT", self.name);
+        let command = format!("{command}; iptables -t nat -D PREROUTING -i {} -p tcp -j DNAT --to-destination 127.0.0.1:{}", self.name, self.host_port);
+        let command = format!("{command}; iptables -t nat -D POSTROUTING -o lo -p tcp --dport {} -d 127.0.0.1 -j SNAT --to-source 127.0.0.1", self.host_port);
+
+        let _ = Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .output()
+            .expect("Failed to execute process");
+    }
+}
 pub fn main() {
     let args: Vec<String> = env::args().collect();
     let (name, remote_addr, local_ip, key, is_client, port, host_port) = parse_args(args);
@@ -27,6 +53,7 @@ pub fn main() {
     if is_client {
         client_handshake(&mut net, &local_ip)
     }
+    let _cleanup = Cleanup { is_client, host_port, name };
     run(net, tunnel, is_client);
 }
 
@@ -76,28 +103,23 @@ fn parse_args(args: Vec<String>) -> (String, String, String, String, bool, u16, 
 }
 
 fn setup_link_dev(name: &str, ip_addr: &str, host_port: u16, is_client: bool) {
-    let command = format!("ip link set dev {name} up; ip addr add {ip_addr}/24 dev {name}");
+    let mut command = format!("ip link set dev {name} up; ip addr add {ip_addr}/24 dev {name}");
+    if is_client {
+        command = format!(
+            "iptables -A FORWARD -i {name} -o lo -p tcp --syn -m conntrack --ctstate NEW -j ACCEPT"
+        );
+        command = format!("{command}; iptables -A FORWARD -i {name} -o lo -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
+        command = format!("{command}; iptables -A FORWARD -i lo -o {name} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
+        command = format!("{command}; iptables -t nat -A PREROUTING -i {name} -p tcp -j DNAT --to-destination 127.0.0.1:{host_port}");
+        command = format!("{command}; iptables -t nat -A POSTROUTING -o lo -p tcp --dport {host_port} -d 127.0.0.1 -j SNAT --to-source 127.0.0.1");
+        command = format!("{command}; sysctl -w net.ipv4.conf.{name}.route_localnet=1");
+    }
     let _ = Command::new("sh")
         .arg("-c")
         .arg(command)
         .output()
         .expect("Failed to execute process");
 
-    if is_client {
-        let command = format!(
-            "iptables -A FORWARD -i {name} -o lo -p tcp --syn -m conntrack --ctstate NEW -j ACCEPT"
-        );
-        let command = format!("{command}; iptables -A FORWARD -i {name} -o lo -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
-        let command = format!("{command}; iptables -A FORWARD -i lo -o {name} -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT");
-        let command = format!("{command}; iptables -t nat -A PREROUTING -i {name} -p tcp -j DNAT --to-destination 127.0.0.1:{host_port}");
-        let command = format!("{command}; iptables -t nat -A POSTROUTING -o lo -p tcp --dport {host_port} -d 127.0.0.1 -j SNAT --to-source 127.0.0.1");
-        let command = format!("{command}; sysctl -w net.ipv4.conf.{name}.route_localnet=1");
-        let _ = Command::new("sh")
-            .arg("-c")
-            .arg(command)
-            .output()
-            .expect("Failed to execute process");
-    }
 }
 
 fn parse_ip(ip: String) -> Vec<u8> {
