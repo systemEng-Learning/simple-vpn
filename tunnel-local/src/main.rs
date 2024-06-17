@@ -1,11 +1,15 @@
 use std::env;
 use std::os::unix::io::AsRawFd;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use libc::{c_int, c_void, sighandler_t, signal, SIGINT};
 use tunnel::net::Net;
 use tunnel::packet;
 use tunnel::select::{select, FdSet};
 use tunnel::tun::TunSocket;
+
+static RUNNING: AtomicBool = AtomicBool::new(false);
 
 struct Cleanup {
     is_client: bool,
@@ -33,6 +37,14 @@ impl Drop for Cleanup {
             .expect("Failed to execute process");
     }
 }
+
+extern fn handler(_: c_int) {
+    RUNNING.store(false, Ordering::SeqCst);
+}
+
+fn get_handler() ->sighandler_t {
+    handler as extern fn(c_int) as *mut c_void as sighandler_t
+}
 pub fn main() {
     let args: Vec<String> = env::args().collect();
     let (name, remote_addr, local_ip, key, is_client, port, host_port) = parse_args(args);
@@ -54,6 +66,7 @@ pub fn main() {
         client_handshake(&mut net, &local_ip)
     }
     let _cleanup = Cleanup { is_client, host_port, name };
+    unsafe { signal(SIGINT, get_handler()); }
     run(net, tunnel, is_client);
 }
 
@@ -144,7 +157,8 @@ fn client_handshake(net: &mut Net, ip: &[u8]) {
 fn run(mut net: Net, tunnel: TunSocket, is_client: bool) {
     let mut tun2net = 0;
     let mut net2tun = 0;
-    loop {
+    RUNNING.store(true, Ordering::SeqCst);
+    while RUNNING.load(Ordering::Relaxed) == true {
         let mut fdset = FdSet::new();
         let net_fd = net.as_raw_fd();
         let tun_fd = tunnel.as_raw_fd();
