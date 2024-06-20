@@ -45,7 +45,7 @@ python3 -m http.server 3001
 run client code
 
 ```
-cargo run -- --client
+cargo run local --local-port 3001 --server-ip 172.26.0.3  --remote-port 8080
 ```
 
 #### server
@@ -53,14 +53,10 @@ cargo run -- --client
 run server code
 
 ```
-cargo run -- --server
+cargo run server --local-port 3200
 ```
 
 then go to the browser and view `localhost:3200`
-
-**Note** ip and port should be changed in code
-
-ALSO THIS DOES NOT WORK PERFECTLY; ONCE CONNECTION IS ESATBLISH ON BOTH END AND CLIENT PAGE CAN BE VIEWED IN SERVER BROWSER IF REFRETCHED THE CONNECTION IS LOST
 
 ### For VPN (Tun-nnel)
 

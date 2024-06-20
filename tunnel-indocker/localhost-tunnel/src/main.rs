@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ Parser, Subcommand};
 use mio::event::Event;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Poll, Registry, Token};
@@ -7,52 +7,65 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
 
-#[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[derive(Parser, Debug)]
+#[clap(author, version, about)]
 struct Cli {
-    #[arg(short, long)]
-    client: bool,
-    #[arg(short, long)]
-    server: bool,
+    #[clap(subcommand)]
+    command: Command,
+}
+
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    Local {
+        #[arg(short, long)]
+        local_port: u16,
+
+        #[arg(short, long)]
+        server_ip: String,
+
+        #[arg(short, long)]
+        remote_port: u16
+    },
+
+    Server {
+        #[clap(short, long)]
+        local_port: u16
+    },
 }
 
 pub fn main() {
-    let cli = Cli::parse();
+    let cli = Cli::parse().command;
 
-    if cli.server && cli.client {
-        eprintln!("Please specify either --client or --server, not both");
-        return;
+    match cli {
+        Command::Local { local_port, server_ip, remote_port } => {
+            let server_addr: SocketAddr = format!("{}:{}", server_ip, remote_port).parse().unwrap();
+            let local_addr: SocketAddr = format!("127.0.0.1:{}", local_port).parse().unwrap();
+
+            handle_client(server_addr, local_addr).unwrap();
+
+        },
+        Command::Server { local_port } => {
+            handle_server(local_port).unwrap();
+        }
     }
 
-    if cli.server {
-        handle_server().unwrap();
-    } else if cli.client {
-        handle_client().unwrap();
-    }
 }
 
-fn handle_client() -> std::io::Result<()> {
-    // specify token to track server and local connections events
+fn handle_client(server_addr: SocketAddr, local_addr: SocketAddr) -> std::io::Result<()> {
     const SERVER: Token = Token(0);
     const LOCAL: Token = Token(1);
 
-    // specify server and local addresses
-    let server_addr: SocketAddr = "172.26.0.3:8080".parse().unwrap(); // you can change this to your server address
-    let local_addr: SocketAddr = "127.0.0.1:3001".parse().unwrap(); // also this to your local address
-
     println!("Connecting to server: {:?}", server_addr);
 
-    // connect to server and local addresses
     let mut server_stream = TcpStream::connect(server_addr)?;
     let mut local_stream = TcpStream::connect(local_addr)?;
 
-    // create a new poll instance
     let mut poll = Poll::new()?;
     let mut events = Events::with_capacity(128);
 
     println!("Connected to server: {:?}", server_stream.peer_addr()?);
 
-    // register server and local streams to poll registry
     poll.registry().register(
         &mut server_stream,
         SERVER,
@@ -65,17 +78,12 @@ fn handle_client() -> std::io::Result<()> {
         Interest::READABLE | Interest::WRITABLE,
     )?;
 
-    let mut server_buffer = vec![0; 4096];
-    let mut local_buffer = vec![0; 4096];
-
     loop {
-        poll.poll(&mut events, None)?; // poll events
+        poll.poll(&mut events, None)?;
 
-        // loop through events
         for event in events.iter() {
             match event.token() {
                 SERVER => {
-                    // handles any readabale and writable events on server stream
                     let mut buffer = vec![0; 4096];
                     if let Err(e) = handle_connection(
                         poll.registry(),
@@ -88,7 +96,6 @@ fn handle_client() -> std::io::Result<()> {
                     }
                 }
                 LOCAL => {
-                    // handles any readable and writable events on local stream
                     let mut buffer = vec![0; 4096];
                     if let Err(e) = handle_connection(
                         poll.registry(),
@@ -97,7 +104,28 @@ fn handle_client() -> std::io::Result<()> {
                         event,
                         &mut buffer,
                     ) {
-                        eprintln!("Error handling local stream: {:?}", e);
+                        if e.kind() == io::ErrorKind::ConnectionReset {
+                            println!("re-establishing connection....");
+                            poll.registry().deregister(&mut local_stream)?;
+                            poll.registry().deregister(&mut server_stream)?;
+                            local_stream = TcpStream::connect(local_addr)?;
+                            server_stream = TcpStream::connect(server_addr)?;
+
+                            poll.registry().register(
+                                &mut server_stream,
+                                SERVER,
+                                Interest::READABLE | Interest::WRITABLE,
+                            )?;
+
+                            poll.registry().register(
+                                &mut local_stream,
+                                LOCAL,
+                                Interest::READABLE | Interest::WRITABLE,
+                            )?;
+                        } else {
+                            eprintln!("Error handling local stream: {:?}", e);
+                            break;
+                        }
                     }
                 }
                 _ => unreachable!(),
@@ -106,11 +134,11 @@ fn handle_client() -> std::io::Result<()> {
     }
 }
 
-fn handle_server() -> std::io::Result<()> {
-    const SERVER: Token = Token(0); // token to track server events
-    const CLIENT: Token = Token(1); // token to track client events
-    const LOCAL: Token = Token(2); // token to track localhost connected client events
-    const LOCALCON: Token = Token(3); // token to track localhost connection events
+fn handle_server(local_port: u16) -> std::io::Result<()> {
+    const SERVER: Token = Token(0);
+    const CLIENT: Token = Token(1);
+    const LOCAL: Token = Token(2);
+    const LOCALCON: Token = Token(3);
 
     let mut poll = Poll::new()?;
     let mut events = Events::with_capacity(128);
@@ -124,9 +152,8 @@ fn handle_server() -> std::io::Result<()> {
 
     println!("server registered");
 
-    // manage connections
-    let mut connections: HashMap<Token, (TcpStream, TcpStream)> = HashMap::new(); // store lochost:3200 stream mapping to client_locahost:3001 stream
-    let mut connections2: HashMap<Token, (TcpListener, TcpStream)> = HashMap::new(); // store lohost listener to client_localhost:3001 stream
+    let mut connections: HashMap<Token, (TcpStream, TcpStream)> = HashMap::new();
+    let mut connections2: HashMap<Token, (TcpListener, TcpStream)> = HashMap::new();
 
     loop {
         if let Err(err) = poll.poll(&mut events, None) {
@@ -139,8 +166,6 @@ fn handle_server() -> std::io::Result<()> {
         for event in events.iter() {
             match event.token() {
                 SERVER => {
-                    // accept client connection
-                    // and then create a local listener to accept localhost connection
                     if event.is_readable() {
                         println!("Accepting connection");
                         let (mut client_stream, address) = match server.accept() {
@@ -154,55 +179,54 @@ fn handle_server() -> std::io::Result<()> {
                         };
                         println!("Accepted connection from: {:?}", address);
 
-                        let local_port = 3200; // local port to listen to
+                        let local_port = local_port;
                         let local_addr: SocketAddr =
                             format!("0.0.0.0:{}", local_port).parse().unwrap();
                         let mut local_listener = TcpListener::bind(local_addr)?;
 
-                        // register local listener to poll registry
-                        // so we can know when the browser is connected to localhost
                         poll.registry().register(
                             &mut local_listener,
                             LOCALCON,
                             Interest::READABLE,
                         )?;
 
+                        // connections.insert(CLIENT, (local_stream, client_stream));
                         connections2.insert(LOCALCON, (local_listener, client_stream));
                     }
                 }
 
                 LOCALCON => {
                     println!("GET TO READABLE HERE");
-                    if event.is_readable() {
-                        if let Some((local_listener, mut client_stream)) =
-                            connections2.remove(&LOCALCON)
-                        {
-                            println!("LOCALHOST is in readable stage");
-                            let (mut local_stream, address) = match local_listener.accept() {
-                                Ok((local_stream, address)) => (local_stream, address),
-                                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                                    break;
-                                }
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                            };
 
-                            println!("Localhost Accepted connection from: {:?}", address);
+                    if let Some((local_listener, mut client_stream)) =
+                        connections2.remove(&LOCALCON)
+                    {
+                        println!("LOCALHOST is in readable stage");
+                        let (mut local_stream, address) = match local_listener.accept() {
+                            Ok((local_stream, address)) => (local_stream, address),
+                            Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                                connections2.insert(LOCALCON, (local_listener, client_stream));
+                                break;
+                            }
+                            Err(e) => {
+                                return Err(e);
+                            }
+                        };
 
-                            poll.registry().register(
-                                &mut client_stream,
-                                CLIENT,
-                                Interest::READABLE | Interest::WRITABLE,
-                            )?;
-                            poll.registry().register(
-                                &mut local_stream,
-                                LOCAL,
-                                Interest::READABLE | Interest::WRITABLE,
-                            )?;
+                        println!("Localhost Accepted connection from: {:?}", address);
 
-                            connections.insert(CLIENT, (local_stream, client_stream));
-                        }
+                        poll.registry().register(
+                            &mut client_stream,
+                            CLIENT,
+                            Interest::READABLE | Interest::WRITABLE,
+                        )?;
+                        poll.registry().register(
+                            &mut local_stream,
+                            LOCAL,
+                            Interest::READABLE | Interest::WRITABLE,
+                        )?;
+
+                        connections.insert(CLIENT, (local_stream, client_stream));
                     }
                 }
                 LOCAL => {
@@ -216,7 +240,9 @@ fn handle_server() -> std::io::Result<()> {
                             event,
                             &mut buffer,
                         ) {
-                            eprintln!("Error handling local stream: {:?}", e);
+                            if e.kind() != io::ErrorKind::ConnectionReset {
+                                eprintln!("Error handling local stream: {:?}", e);
+                            }
                         }
                     }
                 }
@@ -231,11 +257,13 @@ fn handle_server() -> std::io::Result<()> {
                             event,
                             &mut buffer,
                         ) {
-                            eprintln!("Error handling local stream: {:?}", e);
+                            eprintln!("Error handling client stream: {:?}", e);
                         }
                     }
                 }
-                _ => unreachable!(),
+                _ => {
+                    println!("Something reached here");
+                }
             }
         }
     }
@@ -262,7 +290,12 @@ fn handle_connection(
                         }
                     }
                 }
-                Ok(0) => break,
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionReset,
+                        "Connection closed",
+                    ))
+                }
                 Ok(_) => break,
                 Err(ref e) if would_block(e) => break,
                 Err(ref e) if interrupted(e) => {
@@ -287,7 +320,12 @@ fn handle_connection(
                         }
                     }
                 }
-                Ok(0) => break,
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::ConnectionReset,
+                        "Connection closed",
+                    ))
+                }
                 Ok(_) => break,
                 Err(ref e) if would_block(e) => break,
                 Err(ref e) if interrupted(e) => {
