@@ -11,7 +11,7 @@ To run a tunnel server with name simpletun, port 3456, and password wordpass wit
 That's it
 
 #### Client
-To run as a client you must run with the following options:
+You can use the server options except `port`. Adding that option will setup a server. In addition, you must run with the following options.:
 * `--client` or `-c`: Just calling this runs the tunnel as a client.
 * `--address` or `-a`: Sets the ip address and port of the server.
 To run a client with name clienttun, tunnelserver 12.93.9.75:3456, and password, it'd be like this
@@ -38,3 +38,6 @@ The nat command replaces the source address of packets with source range 10.0.0.
     route add -host 93.184.215.14/32 gw 10.0.0.2 dev clienttun
 ```
 The route command routes example.com ip through our tunnel.
+
+### Encryption
+Your server and client must be running with the same password for successful encryption and decryption of packets.
